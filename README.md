@@ -31,9 +31,15 @@ instruction, not a substitute for a Codex approval required by the client.
 `paused`, `inactive`, or `gone`) to the fixed allowlisted recipient. A typical
 agent sends `composing` before longer work and `active` after its reply.
 
-While `xmpp_wait_for_message` is waiting, the account publishes an available
-presence with the status `Ожидаю указания`. Receiving a command changes it to
-`Работаю`; sending the next message returns it to the waiting status.
+While `xmpp_wait_for_message` is waiting, the account publishes a directed
+`chat` presence with the status `Ожидаю указания` to the allowlisted JID.
+Receiving a command changes it to `dnd` / `Работаю`; sending the next message
+or leaving the wait without a message clears the text and returns to plain
+online presence.
+
+Incoming messages that request XEP-0333 Displayed Markers with `markable` are
+automatically marked as `displayed`. Markers are sent only to the fixed
+allowlisted JID and are never generated in response to another marker.
 
 Polling and waiting use durable integer cursors. Save `next_cursor` and pass it
 as `after_cursor` on the next call. `request_id` maps to the XMPP thread field;

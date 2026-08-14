@@ -13,6 +13,7 @@ from xmpp_mcp.config import Settings, bare_jid
 from xmpp_mcp.store import MessageStore
 
 CHAT_STATES = frozenset({"active", "composing", "gone", "inactive", "paused"})
+CHAT_MARKERS_NS = "urn:xmpp:chat-markers:0"
 WAITING_STATUS = "Ожидаю указания"
 WORKING_STATUS = "Работаю"
 
@@ -36,6 +37,7 @@ class RestrictedXmppClient(slixmpp.ClientXMPP):
         self.register_plugin("xep_0198")
         self.register_plugin("xep_0199")
         self.register_plugin("xep_0203")
+        self.register_plugin("xep_0333")
         self.register_plugin("xep_0359")
 
     async def _session_start(self, _event: Any) -> None:
@@ -75,6 +77,19 @@ class RestrictedXmppClient(slixmpp.ClientXMPP):
             received_at=received_at,
         )
         if cursor is not None:
+            xml = getattr(message, "xml", None)
+            markable = (
+                xml is not None
+                and xml.find(f"{{{CHAT_MARKERS_NS}}}markable") is not None
+            )
+            if markable:
+                self.plugin["xep_0333"].send_marker(
+                    mto=self.settings.allowed_jid,
+                    id=stanza_id,
+                    marker="displayed",
+                    thread=thread_id,
+                    mtype="chat",
+                )
             async with self.changed:
                 self.changed.notify_all()
 
@@ -113,7 +128,7 @@ class XmppBridge:
         message["id"] = message_id
         message["thread"] = request_id
         message.send()
-        self._publish_presence(WAITING_STATUS)
+        self._clear_presence()
         return {
             "message_id": message_id,
             "request_id": request_id,
@@ -145,7 +160,15 @@ class XmppBridge:
         return result
 
     def _publish_presence(self, status: str) -> None:
-        self.client.send_presence(pstatus=status)
+        show = "dnd" if status == WORKING_STATUS else "chat"
+        self.client.send_presence(
+            pto=self.settings.allowed_jid,
+            pshow=show,
+            pstatus=status,
+        )
+
+    def _clear_presence(self) -> None:
+        self.client.send_presence(pto=self.settings.allowed_jid)
 
     def poll(
         self, after_cursor: int, limit: int = 20, request_id: str | None = None
@@ -169,23 +192,30 @@ class XmppBridge:
     ) -> dict[str, Any]:
         await self.ensure_connected()
         self._publish_presence(WAITING_STATUS)
-        existing = self.poll(after_cursor, request_id=request_id)
-        if existing["messages"]:
-            self._publish_presence(WORKING_STATUS)
-            return existing
-
-        timeout_seconds = max(1, min(timeout_seconds, 1800))
+        working = False
         try:
-            async with asyncio.timeout(timeout_seconds):
-                async with self.changed:
-                    while True:
-                        await self.changed.wait()
-                        result = self.poll(after_cursor, request_id=request_id)
-                        if result["messages"]:
-                            self._publish_presence(WORKING_STATUS)
-                            return result
-        except TimeoutError:
-            return {"messages": [], "next_cursor": after_cursor, "timed_out": True}
+            existing = self.poll(after_cursor, request_id=request_id)
+            if existing["messages"]:
+                self._publish_presence(WORKING_STATUS)
+                working = True
+                return existing
+
+            timeout_seconds = max(1, min(timeout_seconds, 1800))
+            try:
+                async with asyncio.timeout(timeout_seconds):
+                    async with self.changed:
+                        while True:
+                            await self.changed.wait()
+                            result = self.poll(after_cursor, request_id=request_id)
+                            if result["messages"]:
+                                self._publish_presence(WORKING_STATUS)
+                                working = True
+                                return result
+            except TimeoutError:
+                return {"messages": [], "next_cursor": after_cursor, "timed_out": True}
+        finally:
+            if not working:
+                self._clear_presence()
 
     async def status(self) -> dict[str, Any]:
         try:
