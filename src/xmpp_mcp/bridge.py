@@ -12,6 +12,10 @@ import slixmpp
 from xmpp_mcp.config import Settings, bare_jid
 from xmpp_mcp.store import MessageStore
 
+CHAT_STATES = frozenset({"active", "composing", "gone", "inactive", "paused"})
+WAITING_STATUS = "Ожидаю указания"
+WORKING_STATUS = "Работаю"
+
 
 class RestrictedXmppClient(slixmpp.ClientXMPP):
     def __init__(self, settings: Settings, store: MessageStore, changed: asyncio.Condition):
@@ -28,6 +32,7 @@ class RestrictedXmppClient(slixmpp.ClientXMPP):
         self.add_event_handler("disconnected", self._disconnected)
         self.add_event_handler("connection_failed", self._connection_failed)
         self.register_plugin("xep_0030")
+        self.register_plugin("xep_0085")
         self.register_plugin("xep_0198")
         self.register_plugin("xep_0199")
         self.register_plugin("xep_0203")
@@ -108,11 +113,39 @@ class XmppBridge:
         message["id"] = message_id
         message["thread"] = request_id
         message.send()
+        self._publish_presence(WAITING_STATUS)
         return {
             "message_id": message_id,
             "request_id": request_id,
             "recipient": self.settings.allowed_jid,
         }
+
+    async def set_chat_state(
+        self, state: str, request_id: str | None = None
+    ) -> dict[str, str]:
+        state = state.strip().lower()
+        if state not in CHAT_STATES:
+            allowed = ", ".join(sorted(CHAT_STATES))
+            raise ValueError(f"state must be one of: {allowed}")
+        await self.ensure_connected()
+        message = self.client.make_message(
+            mto=self.settings.allowed_jid,
+            mtype="chat",
+        )
+        message["chat_state"] = state
+        if request_id:
+            message["thread"] = request_id
+        message.send()
+        result = {
+            "state": state,
+            "recipient": self.settings.allowed_jid,
+        }
+        if request_id:
+            result["request_id"] = request_id
+        return result
+
+    def _publish_presence(self, status: str) -> None:
+        self.client.send_presence(pstatus=status)
 
     def poll(
         self, after_cursor: int, limit: int = 20, request_id: str | None = None
@@ -135,8 +168,10 @@ class XmppBridge:
         request_id: str | None = None,
     ) -> dict[str, Any]:
         await self.ensure_connected()
+        self._publish_presence(WAITING_STATUS)
         existing = self.poll(after_cursor, request_id=request_id)
         if existing["messages"]:
+            self._publish_presence(WORKING_STATUS)
             return existing
 
         timeout_seconds = max(1, min(timeout_seconds, 1800))
@@ -147,6 +182,7 @@ class XmppBridge:
                         await self.changed.wait()
                         result = self.poll(after_cursor, request_id=request_id)
                         if result["messages"]:
+                            self._publish_presence(WORKING_STATUS)
                             return result
         except TimeoutError:
             return {"messages": [], "next_cursor": after_cursor, "timed_out": True}

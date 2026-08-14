@@ -23,8 +23,17 @@ instruction, not a substitute for a Codex approval required by the client.
 
 - `xmpp_status`
 - `xmpp_send_message`
+- `xmpp_set_chat_state`
 - `xmpp_poll_messages`
 - `xmpp_wait_for_message`
+
+`xmpp_set_chat_state` publishes XEP-0085 states (`active`, `composing`,
+`paused`, `inactive`, or `gone`) to the fixed allowlisted recipient. A typical
+agent sends `composing` before longer work and `active` after its reply.
+
+While `xmpp_wait_for_message` is waiting, the account publishes an available
+presence with the status `Ожидаю указания`. Receiving a command changes it to
+`Работаю`; sending the next message returns it to the waiting status.
 
 Polling and waiting use durable integer cursors. Save `next_cursor` and pass it
 as `after_cursor` on the next call. `request_id` maps to the XMPP thread field;

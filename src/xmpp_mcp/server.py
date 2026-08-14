@@ -40,6 +40,16 @@ async def xmpp_send_message(text: str, request_id: str | None = None) -> str:
 
 
 @mcp.tool()
+async def xmpp_set_chat_state(state: str, request_id: str | None = None) -> str:
+    """Publish an XEP-0085 chat state to the single allowlisted JID.
+
+    state must be active, composing, paused, inactive, or gone. The recipient
+    cannot be overridden. Pass request_id when the peer preserves XMPP threads.
+    """
+    return encoded(await bridge().set_chat_state(state=state, request_id=request_id))
+
+
+@mcp.tool()
 def xmpp_poll_messages(
     after_cursor: int = 0,
     limit: int = 20,
@@ -80,4 +90,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
