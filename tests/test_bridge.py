@@ -31,6 +31,7 @@ def settings(tmp_path: Path) -> Settings:
         port=5222,
         connect_timeout=1,
         state_dir=state,
+        display_name="project@test-host",
     )
 
 
@@ -89,6 +90,29 @@ async def test_wait_times_out_normally(tmp_path: Path) -> None:
         },
         {"pto": "owner@example.org"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_wait_can_leave_presence_to_orchestrator(tmp_path: Path) -> None:
+    bridge = XmppBridge(settings(tmp_path))
+    presences: list[dict[str, str]] = []
+
+    async def already_connected() -> None:
+        return None
+
+    bridge.ensure_connected = already_connected  # type: ignore[method-assign]
+    bridge.client.send_presence = (  # type: ignore[method-assign]
+        lambda **fields: presences.append(fields)
+    )
+
+    result = await bridge.wait(
+        after_cursor=0,
+        timeout_seconds=0.01,
+        manage_presence=False,
+    )
+
+    assert result == {"messages": [], "next_cursor": 0, "timed_out": True}
+    assert presences == []
 
 
 @pytest.mark.asyncio
@@ -215,6 +239,49 @@ async def test_set_chat_state_rejects_unknown_state(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_set_agent_status_publishes_and_clears_presence(tmp_path: Path) -> None:
+    bridge = XmppBridge(settings(tmp_path))
+    presences: list[dict[str, str]] = []
+
+    async def already_connected() -> None:
+        return None
+
+    bridge.ensure_connected = already_connected  # type: ignore[method-assign]
+    bridge.client.send_presence = (  # type: ignore[method-assign]
+        lambda **fields: presences.append(fields)
+    )
+
+    assert await bridge.set_agent_status(" WAITING ") == {
+        "status": "waiting",
+        "recipient": "owner@example.org",
+    }
+    await bridge.set_agent_status("working")
+    await bridge.set_agent_status("clear")
+
+    assert presences == [
+        {
+            "pto": "owner@example.org",
+            "pshow": "chat",
+            "pstatus": "Ожидаю указания",
+        },
+        {
+            "pto": "owner@example.org",
+            "pshow": "dnd",
+            "pstatus": "Работаю",
+        },
+        {"pto": "owner@example.org"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_set_agent_status_rejects_unknown_status(tmp_path: Path) -> None:
+    bridge = XmppBridge(settings(tmp_path))
+
+    with pytest.raises(ValueError, match="status must be one of"):
+        await bridge.set_agent_status("busy")
+
+
+@pytest.mark.asyncio
 async def test_send_returns_presence_to_waiting(tmp_path: Path) -> None:
     bridge = XmppBridge(settings(tmp_path))
     made: list[FakeMessage] = []
@@ -237,4 +304,12 @@ async def test_send_returns_presence_to_waiting(tmp_path: Path) -> None:
     await bridge.send("done", request_id="request-1")
 
     assert made[0].sent is True
+    assert made[0].fields == {
+        "mto": "owner@example.org",
+        "mbody": "done",
+        "mtype": "chat",
+        "mnick": "project@test-host",
+        "id": made[0].fields["id"],
+        "thread": "request-1",
+    }
     assert presences == [{"pto": "owner@example.org"}]

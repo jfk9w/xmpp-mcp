@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import os
+import socket
 from dataclasses import dataclass
 from pathlib import Path
 
 
 def bare_jid(value: str) -> str:
     return value.strip().split("/", 1)[0].casefold()
+
+
+def generated_display_name(hostname: str, working_dir: str) -> str:
+    host = hostname.strip().split(".", 1)[0] or "unknown-host"
+    path = Path(working_dir).expanduser()
+    project = path.name or path.parent.name or "workspace"
+    return f"{project[:64]}@{host[:32]}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,6 +26,7 @@ class Settings:
     port: int
     connect_timeout: float
     state_dir: Path
+    display_name: str
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -39,6 +48,10 @@ class Settings:
         ).expanduser()
         state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         state_dir.chmod(0o700)
+        display_name = generated_display_name(
+            socket.gethostname(),
+            os.environ.get("MCP_XMPP_WORKING_DIR", os.getcwd()),
+        )
 
         settings = cls(
             login=login,
@@ -48,5 +61,6 @@ class Settings:
             port=int(os.environ.get("MCP_XMPP_PORT", "5222")),
             connect_timeout=float(os.environ.get("MCP_XMPP_CONNECT_TIMEOUT", "20")),
             state_dir=state_dir,
+            display_name=display_name,
         )
         return settings

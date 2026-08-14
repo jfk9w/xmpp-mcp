@@ -24,6 +24,7 @@ instruction, not a substitute for a Codex approval required by the client.
 - `xmpp_status`
 - `xmpp_send_message`
 - `xmpp_set_chat_state`
+- `xmpp_set_agent_status`
 - `xmpp_poll_messages`
 - `xmpp_wait_for_message`
 
@@ -31,11 +32,21 @@ instruction, not a substitute for a Codex approval required by the client.
 `paused`, `inactive`, or `gone`) to the fixed allowlisted recipient. A typical
 agent sends `composing` before longer work and `active` after its reply.
 
+Outgoing text messages include an XEP-0172 nickname generated as
+`<working-directory-name>@<short-hostname>`. Set `MCP_XMPP_WORKING_DIR` when the
+MCP process cwd is not the Codex workspace. The recipient client may use this
+hint as a display name, but its local roster name remains authoritative.
+
 While `xmpp_wait_for_message` is waiting, the account publishes a directed
 `chat` presence with the status `Ожидаю указания` to the allowlisted JID.
 Receiving a command changes it to `dnd` / `Работаю`; sending the next message
 or leaving the wait without a message clears the text and returns to plain
 online presence.
+
+For orchestration loops, call `xmpp_set_agent_status` with `waiting`, invoke
+`xmpp_wait_for_message` with `manage_presence=false` for each inner wait, and
+publish `working` when a message arrives. Use `clear` when leaving the loop
+without sending a reply.
 
 Incoming messages that request XEP-0333 Displayed Markers with `markable` are
 automatically marked as `displayed`. Markers are sent only to the fixed

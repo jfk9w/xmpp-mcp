@@ -50,6 +50,16 @@ async def xmpp_set_chat_state(state: str, request_id: str | None = None) -> str:
 
 
 @mcp.tool()
+async def xmpp_set_agent_status(status: str) -> str:
+    """Publish the agent presence to the single allowlisted JID.
+
+    status must be waiting, working, or clear. Use explicit status management
+    around orchestration loops that disable wait's automatic presence lifecycle.
+    """
+    return encoded(await bridge().set_agent_status(status=status))
+
+
+@mcp.tool()
 def xmpp_poll_messages(
     after_cursor: int = 0,
     limit: int = 20,
@@ -70,16 +80,20 @@ async def xmpp_wait_for_message(
     after_cursor: int,
     timeout_seconds: float = 300,
     request_id: str | None = None,
+    manage_presence: bool = True,
 ) -> str:
     """Wait for the next allowlisted message after a durable cursor.
 
     timeout_seconds is clamped to 1..1800 seconds. A timeout is a normal result.
+    Set manage_presence=false only when an orchestration loop manages presence
+    explicitly with xmpp_set_agent_status.
     """
     return encoded(
         await bridge().wait(
             after_cursor=max(0, after_cursor),
             timeout_seconds=timeout_seconds,
             request_id=request_id,
+            manage_presence=manage_presence,
         )
     )
 
